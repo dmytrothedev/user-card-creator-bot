@@ -1,0 +1,148 @@
+import json
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+    ConversationHandler,
+    CallbackQueryHandler,
+)
+
+TOKEN = "paste_your_token"
+
+# unpacking conversation steps
+ASK_NAME, ASK_AGE, ASK_CITY, ASK_BIO = range(4)
+
+
+# debug handler – prints every update to console
+async def debug_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    as_dict = update.to_dict()
+    print("\n--- NEW UPDATE ---")
+    print(json.dumps(as_dict, indent=2, ensure_ascii=False))
+
+
+# /start – entry point
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("Yes, let's start ✅", callback_data="ready")],
+        [InlineKeyboardButton("Not now ❌", callback_data="not_ready")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "Hi! I’m a bot that can create your personal profile card. Ready to begin?",
+        reply_markup=reply_markup,
+    )
+
+
+# handles inline buttons from /start
+async def start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "ready":
+        await query.edit_message_text(
+            "Great! To start the questionnaire, type /profile"
+        )
+    elif query.data == "not_ready":
+        await query.edit_message_text(
+            "Okay, no problem. Just send /start when you're ready 👍"
+        )
+    elif query.data == "finish":
+        await query.edit_message_text("Awesome! Thanks for filling it out 🤝")
+    elif query.data == "edit":
+        await query.edit_message_text("Okay, let's do it again. Type /profile")
+    else:
+        await query.edit_message_text("Unknown action. Please try /start again.")
+
+
+# step 1 – ask name
+async def profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("What is your name?")
+    return ASK_NAME
+
+
+# step 2 – ask age
+async def ask_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["name"] = update.message.text
+    await update.message.reply_text("How old are you?")
+    return ASK_AGE
+
+
+# step 3 – ask city
+async def ask_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["age"] = update.message.text
+    await update.message.reply_text("What city are you from?")
+    return ASK_CITY
+
+
+# step 4 – ask short bio
+async def ask_bio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["city"] = update.message.text
+    await update.message.reply_text("Tell me a little about yourself ✍️")
+    return ASK_BIO
+
+
+# final step – show result
+async def show_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["bio"] = update.message.text
+
+    name = context.user_data["name"]
+    age = context.user_data["age"]
+    city = context.user_data["city"]
+    bio = context.user_data["bio"]
+
+    keyboard = [
+        [InlineKeyboardButton("Edit data ✏️", callback_data="edit")],
+        [InlineKeyboardButton("Looks good ✅", callback_data="finish")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"📇 Your profile card:\n"
+        f"Name: {name}\n"
+        f"Age: {age}\n"
+        f"City: {city}\n"
+        f"About you: {bio}",
+        reply_markup=reply_markup,
+    )
+
+    return ConversationHandler.END
+
+
+# /cancel – abort conversation
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Profile creation canceled.")
+    return ConversationHandler.END
+
+
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    # conversation flow
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("profile", profile_start)],
+        states={
+            ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_age)],
+            ASK_AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_city)],
+            ASK_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_bio)],
+            ASK_BIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, show_result)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    # common handlers
+    app.add_handler(conv_handler)
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("profile", profile_start))
+    app.add_handler(CallbackQueryHandler(start_callback))
+    app.add_handler(MessageHandler(filters.ALL, debug_update))
+
+    print("Bot is running...")
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
